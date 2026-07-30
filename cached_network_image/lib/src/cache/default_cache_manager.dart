@@ -9,14 +9,12 @@ import 'package:crypto/crypto.dart';
 import 'package:file/file.dart';
 import 'package:file/local.dart';
 import 'package:flutter/widgets.dart';
-import 'package:hive_ce/hive.dart';
-// ignore: implementation_imports
-import 'package:hive_ce/src/hive_impl.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 
 import 'cache_entry_metadata.dart';
+import 'cache_metadata_store.dart';
 import 'cleanup_strategy.dart';
 import 'interceptors/cache_interceptor.dart';
 import 'interceptors/http_interceptor.dart';
@@ -25,7 +23,6 @@ import 'shared_http_client.dart';
 
 export 'cache_entry_metadata.dart';
 
-const _kBoxName = 'cached_network_image_cache';
 const _kDefaultMaxAge = Duration(days: 30);
 const _kDefaultMaxCacheObjects = 200;
 const _kDefaultStalePeriod = Duration(days: 7);
@@ -33,8 +30,8 @@ const _kOrphanFileGracePeriod = Duration(minutes: 5);
 
 const _supportedFileNames = ['jpg', 'jpeg', 'png', 'tga', 'cur', 'ico'];
 
-/// Sanitizes a key so it doesn't exceed Hive's 255-character limit for string keys.
-String _sanitizeBoxKey(String key) {
+/// Sanitizes a key so it doesn't exceed KV backends with short key limits.
+String _sanitizeMetaKey(String key) {
   if (key.length <= 255) return key;
   final hash = sha256.convert(utf8.encode(key)).toString();
   // 255 max limit. 255 - 64 (sha256 hex length) - 1 (underscore) = 190
@@ -46,34 +43,32 @@ String _sanitizeBoxKey(String key) {
 /// Defaults to [getTemporaryDirectory] when not specified.
 typedef CacheDirectoryProvider = Future<io.Directory> Function();
 
-/// Default cache manager implementation using Hive CE for metadata storage,
-/// the http package for downloads, and path_provider for file system access.
+/// Default cache manager: filesystem for image bytes + injected KV for metadata.
+///
+/// Does **not** bundle Hive/MMKV/sqflite. Host apps must pass [metadataStore].
 class DefaultCacheManager extends CacheManager with ImageCacheManager {
-  /// Creates a [DefaultCacheManager] with optional configuration.
+  /// Creates a [DefaultCacheManager].
   ///
+  /// [metadataStore] holds JSON-encoded [CacheEntryMetadata] entries.
   /// [stalePeriod] is how long a file remains valid in the cache.
   /// [maxNrOfCacheObjects] is the maximum before cleanup triggers.
   /// [httpClientFactory] allows injecting a custom HTTP client (useful for testing).
   /// [cacheDirectoryProvider] allows overriding where cache files are stored.
-  ///   Defaults to [getTemporaryDirectory]. Pass [getApplicationSupportDirectory]
-  ///   if you need a more persistent location (but note that files may be
-  ///   backed up on iOS/Android).
-  /// [metadataDirectoryProvider] allows overriding where Hive metadata is stored.
-  ///   Defaults to [cacheDirectoryProvider] for backwards compatibility.
+  ///   Defaults to [getTemporaryDirectory].
   DefaultCacheManager({
+    required CacheMetadataStore metadataStore,
     this.stalePeriod = _kDefaultStalePeriod,
     this.maxNrOfCacheObjects = _kDefaultMaxCacheObjects,
     this.connectionParameters,
     http.Client Function()? httpClientFactory,
     CacheDirectoryProvider? cacheDirectoryProvider,
-    CacheDirectoryProvider? metadataDirectoryProvider,
     List<HttpInterceptor> httpInterceptors = const [],
     List<CacheInterceptor> cacheInterceptors = const [],
     CleanupStrategy? cleanupStrategy,
-  })  : _httpClient = SharedHttpClient(httpClientFactory ?? http.Client.new),
+  })  : _metadataStore = metadataStore,
+        _httpClient = SharedHttpClient(httpClientFactory ?? http.Client.new),
         _cacheDirectoryProvider =
             cacheDirectoryProvider ?? getTemporaryDirectory,
-        _metadataDirectoryProvider = metadataDirectoryProvider,
         _httpInterceptors = httpInterceptors,
         _cacheInterceptors = cacheInterceptors,
         _cleanupStrategy = cleanupStrategy ?? const TtlCleanupStrategy();
@@ -95,8 +90,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// Provider for the base cache directory.
   final CacheDirectoryProvider _cacheDirectoryProvider;
 
-  /// Provider for the base Hive metadata directory.
-  final CacheDirectoryProvider? _metadataDirectoryProvider;
+  /// Host-provided metadata KV store.
+  final CacheMetadataStore _metadataStore;
 
   /// HTTP interceptors that run for every download.
   final List<HttpInterceptor> _httpInterceptors;
@@ -107,13 +102,8 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// Strategy that determines the eviction order when the cache is over capacity.
   final CleanupStrategy _cleanupStrategy;
 
-  /// Private Hive instance to avoid conflicts with the host app's global
-  /// [Hive] singleton. Each [DefaultCacheManager] gets its own isolated
-  /// Hive registry.
-  final HiveInterface _hive = HiveImpl();
-
-  Box<Map>? _cacheBox;
   String? _cacheDir;
+  bool _storeReady = false;
 
   /// Guards [_doInit] so that concurrent callers (e.g. multiple images
   /// loading at the same time on cold start) share the same init future.
@@ -123,7 +113,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// [dispose] can wait for it instead of racing it.
   Future<void>? _cleanupFuture;
 
-  /// Initialize Hive and open the cache metadata box.
+  /// Initialize the metadata store and cache directory.
   ///
   /// Uses a [Completer] to ensure that only one initialization runs at a
   /// time, even when multiple callers invoke this concurrently.
@@ -154,97 +144,46 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
   Future<void> _doInit() async {
     final dir = await _cacheDirectoryProvider();
-    final metadataDir = _metadataDirectoryProvider == null
-        ? dir
-        : await _metadataDirectoryProvider!();
-
-    // When a distinct metadataDirectoryProvider is configured, namespace the
-    // cache file directory by that location. Otherwise two DefaultCacheManager
-    // instances could share the same cacheDirectoryProvider while keeping
-    // separate, unaware-of-each-other Hive boxes — each instance's orphan
-    // sweep would then see the other's files as unknown and delete them.
-    final cacheSubDir = _metadataDirectoryProvider == null
-        ? 'cached_network_image_ce'
-        : path.join(
-            'cached_network_image_ce',
-            sha256
-                .convert(utf8.encode(metadataDir.path))
-                .toString()
-                .substring(0, 16),
-          );
-    _cacheDir = path.join(dir.path, cacheSubDir);
+    _cacheDir = path.join(dir.path, 'cached_network_image');
     await io.Directory(_cacheDir!).create(recursive: true);
 
-    final hivePath = path.join(
-      metadataDir.path,
-      'cached_network_image_ce',
-      'hive',
-    );
-    await io.Directory(hivePath).create(recursive: true);
+    await _metadataStore.initialize();
+    _storeReady = true;
 
-    // Open the box with an explicit path on the private Hive instance.
-    // This avoids calling Hive.init() which would conflict with the
-    // host application's own Hive initialization.
-    try {
-      _cacheBox = await _hive.openBox<Map>(_kBoxName, path: hivePath);
-    } on HiveError catch (e) {
-      // Box corruption (e.g. "Cannot read, unknown typeId: 121").
-      // Since this is a cache, we can safely delete the corrupted box
-      // and start fresh. Cached images will simply be re-downloaded.
-      cacheLogger.log(
-        'CacheManager: Hive box corrupted, resetting cache: $e',
-        CacheManagerLogLevel.warning,
-      );
-      await _safeDeleteBox(_kBoxName, hivePath);
-      _cacheBox = await _hive.openBox<Map>(_kBoxName, path: hivePath);
-
-      // Also remove cached files since their metadata is gone.
-      await _deleteCacheFiles();
-    }
-
-    // Run cleanup in background, but keep a handle so dispose() can wait
-    // for it instead of nulling fields out from under it mid-sweep.
     _cleanupFuture = _cleanupOldFiles();
     unawaited(_cleanupFuture);
   }
 
-  /// Attempts to delete a Hive box from disk, tolerating missing files.
-  ///
-  /// [HiveImpl.deleteBoxFromDisk] can throw [PathNotFoundException] when
-  /// auxiliary files (e.g. `.lock`) are already gone. In that case we
-  /// fall back to manually deleting the `.hive` file.
-  Future<void> _safeDeleteBox(String boxName, String boxPath) async {
-    try {
-      await _hive.deleteBoxFromDisk(boxName, path: boxPath);
-    } on Object catch (_) {
-      // Fallback: delete the .hive file directly.
-      final boxFile = io.File(path.join(boxPath, '$boxName.hive'));
-      if (await boxFile.exists()) {
-        await boxFile.delete();
-      }
-    }
+  CacheEntryMetadata? _readMeta(String logicalKey) {
+    return _readMetaStoredKey(_sanitizeMetaKey(logicalKey));
   }
 
-  /// Deletes all cached image files in the cache directory.
-  ///
-  /// Called after a corruption recovery to remove orphaned files whose
-  /// metadata has been lost.
-  Future<void> _deleteCacheFiles() async {
+  CacheEntryMetadata? _readMetaStoredKey(String storedKey) {
+    final raw = _metadataStore.getString(storedKey);
+    if (raw == null || raw.isEmpty) return null;
     try {
-      final cacheDir = io.Directory(_cacheDir!);
-      if (await cacheDir.exists()) {
-        await for (final entity in cacheDir.list()) {
-          if (entity is io.File) {
-            await entity.delete();
-          }
-        }
+      final decoded = jsonDecode(raw);
+      if (decoded is Map) {
+        return CacheEntryMetadata.fromMap(decoded);
       }
     } on Object catch (e) {
       cacheLogger.log(
-        'CacheManager: Error cleaning orphaned cache files: $e',
+        'CacheManager: bad metadata for $storedKey: $e',
         CacheManagerLogLevel.warning,
       );
     }
+    return null;
+  }
+
+  void _writeMeta(String logicalKey, CacheEntryMetadata metadata) {
+    _metadataStore.putString(
+      _sanitizeMetaKey(logicalKey),
+      jsonEncode(metadata.toMap()),
+    );
+  }
+
+  void _deleteMeta(String logicalKey) {
+    _metadataStore.remove(_sanitizeMetaKey(logicalKey));
   }
 
   String _cacheFilePath(String relativePath) {
@@ -547,7 +486,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       }
     }
 
-    // Store metadata in Hive
+    // Store metadata in injected KV
     final validTill = DateTime.now().add(stalePeriod);
     final cacheHeaders = response.headers;
     final eTag = cacheHeaders['etag'];
@@ -571,7 +510,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     );
     final String deliveryPath;
     if (storeOutcome) {
-      await _cacheBox!.put(_sanitizeBoxKey(key), metadata.toMap());
+      _writeMeta(key, metadata);
       deliveryPath = filePath;
     } else {
       // Interceptor rejected storage: copy to a temp file for this delivery,
@@ -596,16 +535,14 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   }) async {
     await _ensureInitialized();
 
-    final raw = _cacheBox!.get(_sanitizeBoxKey(key));
-    if (raw == null) return null;
-
-    final metadata = CacheEntryMetadata.fromMap(raw);
+    final metadata = _readMeta(key);
+    if (metadata == null) return null;
 
     final filePath = _cacheFilePath(metadata.relativePath);
     final file = io.File(filePath);
     if (!file.existsSync()) {
       // Metadata exists but file is missing, clean up
-      await _cacheBox!.delete(_sanitizeBoxKey(key));
+      _deleteMeta(key);
       return null;
     }
 
@@ -622,15 +559,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   /// based on stale metadata. Fire-and-forget — callers should wrap with
   /// [unawaited].
   Future<void> _touchEntry(String key) async {
-    // Capture _cacheBox before the first await to guard against a concurrent
-    // dispose() nulling the field while this future is suspended.
-    final box = _cacheBox;
-    if (box == null || !box.isOpen) return;
-    final sanitizedKey = _sanitizeBoxKey(key);
+    if (!_storeReady) return;
     try {
-      final raw = box.get(sanitizedKey);
-      if (raw == null) return;
-      final current = CacheEntryMetadata.fromMap(raw);
+      final current = _readMeta(key);
+      if (current == null) return;
       final updated = CacheEntryMetadata(
         url: current.url,
         relativePath: current.relativePath,
@@ -639,7 +571,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
         length: current.length,
         touchedAt: DateTime.now(),
       );
-      await box.put(sanitizedKey, updated.toMap());
+      _writeMeta(key, updated);
     } on Object catch (e) {
       cacheLogger.log(
         'CacheManager: Failed to update touchedAt for $key: $e',
@@ -669,16 +601,17 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     await file.writeAsBytes(fileBytes);
 
     final validTill = DateTime.now().add(maxAge);
-    _cacheBox!.put(
-        _sanitizeBoxKey(key),
-        CacheEntryMetadata(
-          url: url,
-          relativePath: relativePath,
-          validTill: validTill,
-          eTag: eTag,
-          length: fileBytes.length,
-          touchedAt: DateTime.now(),
-        ).toMap());
+    _writeMeta(
+      key,
+      CacheEntryMetadata(
+        url: url,
+        relativePath: relativePath,
+        validTill: validTill,
+        eTag: eTag,
+        length: fileBytes.length,
+        touchedAt: DateTime.now(),
+      ),
+    );
 
     return const LocalFileSystem().file(filePath);
   }
@@ -687,14 +620,13 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
   Future<void> removeFile(String key) async {
     await _ensureInitialized();
 
-    final raw = _cacheBox!.get(_sanitizeBoxKey(key));
-    if (raw != null) {
-      final metadata = CacheEntryMetadata.fromMap(raw);
+    final metadata = _readMeta(key);
+    if (metadata != null) {
       final file = io.File(_cacheFilePath(metadata.relativePath));
       if (await file.exists()) {
         await file.delete();
       }
-      await _cacheBox!.delete(_sanitizeBoxKey(key));
+      _deleteMeta(key);
     }
   }
 
@@ -703,10 +635,9 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
     await _ensureInitialized();
 
     // Delete all cached files
-    for (final key in _cacheBox!.keys.toList()) {
-      final raw = _cacheBox!.get(key);
-      if (raw != null) {
-        final metadata = CacheEntryMetadata.fromMap(raw);
+    for (final key in _metadataStore.keys.toList()) {
+      final metadata = _readMetaStoredKey(key);
+      if (metadata != null) {
         final file = io.File(_cacheFilePath(metadata.relativePath));
         if (await file.exists()) {
           await file.delete();
@@ -714,7 +645,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       }
     }
 
-    await _cacheBox!.clear();
+    _metadataStore.clear();
   }
 
   @override
@@ -739,21 +670,13 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
 
     _httpClient.dispose();
 
-    if (_cacheBox != null && _cacheBox!.isOpen) {
-      try {
-        await _cacheBox!.close();
-      } on Object catch (_) {
-        // Ignore errors when closing box (e.g. PathNotFoundException if the
-        // cache directory was deleted before dispose was called).
-      }
-    }
     try {
-      await _hive.close();
+      await _metadataStore.dispose();
     } on Object catch (_) {
-      // Ignore errors when closing Hive (e.g. residual lock file already gone).
+      // Host store may already be closed.
     }
 
-    _cacheBox = null;
+    _storeReady = false;
     _cacheDir = null;
     _initCompleter = null;
     _cleanupFuture = null;
@@ -765,10 +688,10 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
       final now = DateTime.now();
       final entries = <MapEntry<String, CacheEntryMetadata>>[];
 
-      for (final key in _cacheBox!.keys.toList()) {
-        final raw = _cacheBox!.get(key);
-        if (raw != null) {
-          entries.add(MapEntry(key as String, CacheEntryMetadata.fromMap(raw)));
+      for (final key in _metadataStore.keys.toList()) {
+        final meta = _readMetaStoredKey(key);
+        if (meta != null) {
+          entries.add(MapEntry(key, meta));
         }
       }
 
@@ -784,14 +707,14 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           if (await file.exists()) {
             await file.delete();
           }
-          await _cacheBox!.delete(entry.key);
+          _metadataStore.remove(entry.key);
         }
       }
 
       // If cache is still too large, remove oldest entries
-      if (_cacheBox!.length > maxNrOfCacheObjects) {
+      if (_metadataStore.length > maxNrOfCacheObjects) {
         final sortedEntries = _cleanupStrategy.sortForEviction(
-          entries.where((e) => _cacheBox!.containsKey(e.key)).toList(),
+          entries.where((e) => _metadataStore.containsKey(e.key)).toList(),
         );
 
         final toRemove = sortedEntries.length - maxNrOfCacheObjects;
@@ -801,7 +724,7 @@ class DefaultCacheManager extends CacheManager with ImageCacheManager {
           if (await file.exists()) {
             await file.delete();
           }
-          await _cacheBox!.delete(entry.key);
+          _metadataStore.remove(entry.key);
         }
       }
     } on Object catch (e) {

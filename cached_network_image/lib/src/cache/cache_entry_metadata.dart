@@ -1,4 +1,4 @@
-/// Typed metadata for a cached file entry, stored in Hive.
+/// Typed metadata for a cached file entry (JSON via CacheMetadataStore).
 final class CacheEntryMetadata {
   CacheEntryMetadata({
     required this.url,
@@ -9,7 +9,7 @@ final class CacheEntryMetadata {
     this.touchedAt,
   });
 
-  /// Reconstructs a [CacheEntryMetadata] from a Hive-stored [Map].
+  /// Reconstructs a [CacheEntryMetadata] from a decoded JSON [Map].
   factory CacheEntryMetadata.fromMap(Map map) {
     final touchedAtMs = map['touchedAt'] as int?;
     return CacheEntryMetadata(
@@ -47,7 +47,7 @@ final class CacheEntryMetadata {
   /// Returns [touchedAt] if set, otherwise falls back to [validTill].
   DateTime get effectiveTouchedAt => touchedAt ?? validTill;
 
-  /// Serializes this metadata to a [Map] for Hive storage.
+  /// Serializes this metadata to a [Map] for JSON encoding.
   Map<String, dynamic> toMap() {
     return {
       'url': url,

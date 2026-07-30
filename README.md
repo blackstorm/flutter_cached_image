@@ -1,204 +1,24 @@
-# Cached Network Image — Community Edition
+# flutter_cached_image
 
-[![pub package](https://img.shields.io/pub/v/cached_network_image_ce.svg)](https://pub.dev/packages/cached_network_image_ce)
-[![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)](opensource.org/licenses/MIT)
+Fork of [cached_network_image_ce](https://pub.dev/packages/cached_network_image_ce) for MilkBaby / blackstorm apps.
 
-A Flutter library to show images from the internet and keep them in the cache directory. 
+## Design
 
-**This is the actively maintained, high-performance community fork of [`cached_network_image`](https://pub.dev/packages/cached_network_image).**
-
----
-
-## 📖 The Story: Why this fork?
-
-The original `cached_network_image` package by Baseflow is a titan in the Flutter ecosystem, used by millions. However, it has been **effectively unmaintained since August 2024**, leaving over 300 issues unresolved, including critical memory leaks and scroll performance bugs.
-
-As the Flutter ecosystem evolved, the original architecture began to show its age. It relied on `sqflite` for cache management—a heavy, SQL-based solution that requires platform channels to communicate with native code. For a simple task like "checking if an image exists," this overhead caused UI jank in heavy lists.
-
-**We created the Community Edition (`_ce`) to fix this.**
-
-We didn't just fork it to merge dependabot PRs. We re-engineered the caching layer.
-
-### ⚡ The Architectural Shift: SQLite vs. Hive
-
-We replaced the heavy `sqflite` dependency with **[`hive_ce`](https://pub.dev/packages/hive_ce)**. 
-
-* **Old Way (`sqflite`):** serialized data → Platform Channel → Java/Obj-C → SQLite → Disk. (Slow, blocking).
-* **New Way (`hive_ce`):** Dart Memory → Direct Disk Access. (Instant, non-blocking).
-
-The result? **Zero-jank scrolling.**
-
-### 🚀 Benchmarks
-
-We benchmarked the cache metadata operations (checking, writing, and deleting cache entries) on an iPhone Simulator. The results speak for themselves:
-
-| Operation | Payload Size | Original (`sqflite`) | **CE (`hive_ce`)** | **Improvement** |
-| :--- | :--- | :--- | :--- | :--- |
-| **Read (Hit Check)** | 10 KB | 16 ms | **2 ms** | ⚡ **8.00x Faster** |
-| **Write (New Image)** | 10 KB | 116 ms | **29 ms** | 🚀 **4.00x Faster** |
-| **Delete (Cleanup)** | 10 KB | 55 ms | **19 ms** | 🧹 **2.89x Faster** |
-| **Read (Large)** | 1 MB | 8 ms | **1 ms** | ⚡ **8.00x Faster** |
-
-*Note: "Read" is the most critical operation for scrolling performance, as every list item checks the cache before rendering.*
-
-![Benchmark Results](simulator_benchmark.png)
-
----
-
-## 🛠 Features
-
-* **Drop-in Replacement:** 99% API compatible with the original package.
-* **High Performance:** Powered by `hive_ce` for instant cache lookups.
-* **Actively Maintained:** Regular updates, bug fixes, and community-driven roadmap.
-* **True Web Support:** Unlike the original package, CE provides **full, persistent image caching** on the Web via IndexedDB (`hive_ce`), completely avoiding RAM freezes by using native image decoding sizes.
-
-## 📦 Installation
-
-Add `cached_network_image_ce` to your `pubspec.yaml`:
-
-```yaml
-dependencies:
-  cached_network_image_ce: ^1.0.0
-
-```
-
-## 💻 How to use
-
-The API is identical to the original package. You can use `CachedNetworkImage` directly or via `ImageProvider`.
-
-### Basic Usage with Placeholder
+- **Image bytes**: native filesystem (IO only; no web package).
+- **Metadata**: **pluggable** [`CacheMetadataStore`](cached_network_image/lib/src/cache/cache_metadata_store.dart) — this package does **not** depend on Hive, MMKV, or sqflite.
+- Host apps inject a store (e.g. MMKV in production, `MemoryCacheMetadataStore` in tests).
 
 ```dart
-import 'package:cached_network_image_ce/cached_network_image.dart';
-
-CachedNetworkImage(
-  imageUrl: '[https://via.placeholder.com/350x150](https://via.placeholder.com/350x150)',
-  placeholder: (context, url) => CircularProgressIndicator(),
-  errorWidget: (context, url, error) => Icon(Icons.error),
-),
-
-```
-
-### With Progress Indicator
-
-```dart
-CachedNetworkImage(
-  imageUrl: '[https://via.placeholder.com/350x150](https://via.placeholder.com/350x150)',
-  progressIndicatorBuilder: (context, url, downloadProgress) =>
-      CircularProgressIndicator(value: downloadProgress.progress),
-  errorWidget: (context, url, error) => Icon(Icons.error),
-),
-
-```
-
-### Advanced Usage (ImageBuilder)
-
-Use this when you need an `ImageProvider` for things like `DecorationImage`:
-
-```dart
-CachedNetworkImage(
-  imageUrl: '[https://via.placeholder.com/200x150](https://via.placeholder.com/200x150)',
-  imageBuilder: (context, imageProvider) => Container(
-    decoration: BoxDecoration(
-      image: DecorationImage(
-        image: imageProvider,
-        fit: BoxFit.cover,
-        colorFilter: ColorFilter.mode(Colors.red, BlendMode.colorBurn),
-      ),
-    ),
-  ),
-  placeholder: (context, url) => CircularProgressIndicator(),
-  errorWidget: (context, url, error) => Icon(Icons.error),
-),
-
-```
-
-### Direct ImageProvider Usage
-
-```dart
-Image(image: CachedNetworkImageProvider(url))
-
-```
-
-### HTTP Interceptors
-
-Intercept and modify HTTP requests, responses, and errors before they reach the cache layer:
-
-```dart
-class AuthInterceptor extends HttpInterceptor {
-  @override
-  void onRequest(HttpRequestData request, HttpRequestHandler handler) {
-    request.headers['Authorization'] = 'Bearer $token';
-    handler.next(request);
-  }
-}
-
-final manager = DefaultCacheManager(
-  httpInterceptors: [AuthInterceptor()],
+CachedNetworkImageProvider.defaultCacheManager = DefaultCacheManager(
+  metadataStore: myCacheMetadataStore,
 );
 ```
 
-### Cache Interceptors (native IO only)
+## Packages
 
-Control cache hit, miss, and store events:
+| Path | Pub name |
+|------|----------|
+| `cached_network_image/` | `cached_network_image_ce` |
+| `cached_network_image_platform_interface/` | `cached_network_image_platform_interface_ce` |
 
-```dart
-class NoCacheInterceptor extends CacheInterceptor {
-  @override
-  void onStore(CacheStoreData data, CacheStoreHandler handler) {
-    handler.reject(); // skip persisting this image
-  }
-}
-
-final manager = DefaultCacheManager(
-  cacheInterceptors: [NoCacheInterceptor()],
-);
-```
-
-Available hooks:
-
-| Hook | Trigger | Actions |
-| :--- | :--- | :--- |
-| `onHit` | Cached entry found | `next` · `resolve(fileInfo)` · `reject` (force re-download) |
-| `onMiss` | No cached entry | `next` · `resolve(fileInfo)` (skip download) |
-| `onStore` | Before writing to cache index | `next` · `reject` (skip persisting) |
-
-> `CacheInterceptor` is not available on web targets.
-
-### Cache Cleanup Strategy
-
-Control which entries are evicted first when the cache exceeds `maxNrOfCacheObjects`:
-
-```dart
-final manager = DefaultCacheManager(
-  maxNrOfCacheObjects: 200,
-  cleanupStrategy: const LruCleanupStrategy(),
-);
-```
-
-| Strategy | Eviction order | Default |
-| :--- | :--- | :--- |
-| `TtlCleanupStrategy` | Soonest-to-expire (`validTill`) first | ✅ |
-| `LruCleanupStrategy` | Least-recently-used (`touchedAt`) first | |
-
-`LruCleanupStrategy` relies on `touchedAt`, which is updated on every cache hit. Legacy entries written before this field existed fall back to `validTill` ordering. Implement `CleanupStrategy` for a custom eviction policy.
-
-## ❓ FAQ
-
-**Q: Will I lose my users' existing cache if I migrate?**
-A: Yes. Because we switched the storage engine from SQLite to Hive, the old cache files will be ignored. Users will re-download images once as they browse. This is a one-time migration cost for a permanent performance gain.
-
-**Q: My app crashes/pauses on errors?**
-A: In Debug mode, Flutter may pause on exceptions even if they are caught. This is expected behavior for network errors (404s). In Release mode, these are handled silently by the `errorWidget`.
-
-**Q: Why is web caching slower or using Hive for image bytes?**
-A: On Mobile & Desktop (IO), this package stores image bytes directly on the incredibly fast native file system, and uses Hive *only* for metadata. The Web platform, however, lacks a native file system. Therefore, for web we use `hive_ce` to store both metadata and the actual image bytes in IndexedDB. Serializing large byte arrays in and out of IndexedDB introduces overhead that isn't present on IO. 
-*Alternative:* If persistent caching across sessions isn't critical for your web users, consider conditionally using the standard `Image.network` on the web, which relies on the browser's built-in memory/HTTP caching to achieve faster decoding.
-
-## 🤝 Contributing
-
-We welcome contributions! If you want to help maintain this essential package, please check the [CONTRIBUTING.md](CONTRIBUTING.md).
-
-## 📄 License
-
-This project is licensed under the MIT License.
+Branch: **main** (not upstream `develop`).
