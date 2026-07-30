@@ -1,8 +1,7 @@
 /// Flutter library to load and cache network images.
 /// Can also be used with placeholder and error widgets.
-library cached_network_image;
 
-export 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart'
+export 'package:cached_image_platform_interface/cached_image_platform_interface.dart'
     show
         BaseCacheManager,
         CacheManager,

@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:io' as io;
 
-import 'package:cached_network_image_ce/src/cache/default_cache_manager.dart';
-import 'package:cached_network_image_ce/src/cache/interceptors/http_interceptor.dart';
-import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
+import 'package:cached_image/src/cache/default_cache_manager.dart';
+import 'package:cached_image/src/cache/interceptors/http_interceptor.dart';
+import 'package:cached_image_platform_interface/cached_image_platform_interface.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;

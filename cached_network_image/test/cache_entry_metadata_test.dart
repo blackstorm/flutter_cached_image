@@ -1,4 +1,4 @@
-import 'package:cached_network_image_ce/src/cache/default_cache_manager.dart';
+import 'package:cached_image/src/cache/default_cache_manager.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

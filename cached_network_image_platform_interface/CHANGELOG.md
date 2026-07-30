@@ -12,7 +12,7 @@
 
 ## [5.0.1] - 2026-02-19
 
-* Renamed package to `cached_network_image_platform_interface_ce`
+* Renamed package to `cached_image_platform_interface`
 * Added `repository` field for pub.dev source code display
 
 ## [4.1.1] - 2024-08-13

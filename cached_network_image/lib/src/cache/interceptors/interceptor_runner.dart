@@ -5,7 +5,7 @@
 
 import 'dart:async';
 
-import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
+import 'package:cached_image_platform_interface/cached_image_platform_interface.dart';
 
 import 'cache_interceptor.dart';
 import 'http_interceptor.dart';

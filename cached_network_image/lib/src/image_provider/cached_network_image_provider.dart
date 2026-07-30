@@ -1,8 +1,8 @@
 import 'dart:async' show Future, StreamController;
 import 'dart:ui' as ui show Codec;
 
-import 'package:cached_network_image_ce/cached_network_image.dart';
-import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart'
+import 'package:cached_image/cached_image.dart';
+import 'package:cached_image_platform_interface/cached_image_platform_interface.dart'
     show ErrorListener, ImageRenderMethodForWeb;
 import '_image_loader.dart';
 import 'package:flutter/foundation.dart';

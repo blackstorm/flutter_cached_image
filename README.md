@@ -1,24 +1,25 @@
 # flutter_cached_image
 
-Fork of [cached_network_image_ce](https://pub.dev/packages/cached_network_image_ce) for MilkBaby / blackstorm apps.
-
-## Design
-
-- **Image bytes**: native filesystem (IO only; no web package).
-- **Metadata**: **pluggable** [`CacheMetadataStore`](cached_network_image/lib/src/cache/cache_metadata_store.dart) — this package does **not** depend on Hive, MMKV, or sqflite.
-- Host apps inject a store (e.g. MMKV in production, `MemoryCacheMetadataStore` in tests).
-
-```dart
-CachedNetworkImageProvider.defaultCacheManager = DefaultCacheManager(
-  metadataStore: myCacheMetadataStore,
-);
-```
+Flutter network image cache with **pluggable metadata storage**.
 
 ## Packages
 
-| Path | Pub name |
-|------|----------|
-| `cached_network_image/` | `cached_network_image_ce` |
-| `cached_network_image_platform_interface/` | `cached_network_image_platform_interface_ce` |
+| Directory | Package name |
+|-----------|----------------|
+| `cached_network_image/` | **`cached_image`** |
+| `cached_network_image_platform_interface/` | **`cached_image_platform_interface`** |
 
-Branch: **main** (not upstream `develop`).
+## Usage
+
+```dart
+import 'package:cached_image/cached_image.dart';
+
+// Required: inject a CacheMetadataStore (e.g. MMKV in the host app).
+CachedNetworkImageProvider.defaultCacheManager = DefaultCacheManager(
+  metadataStore: myStore,
+);
+
+CachedNetworkImage(imageUrl: url);
+```
+
+Branch: **main**. IO-only (no web package). No bundled Hive/MMKV/sqflite.

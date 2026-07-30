@@ -1,4 +1,4 @@
-# cached_network_image_platform_interface_ce
+# cached_image_platform_interface
 
 Platform interface package for `cached_network_image_ce` and platform
 implementations.

@@ -1,6 +1,6 @@
 import 'dart:io' as io;
 
-import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
+import 'package:cached_image_platform_interface/cached_image_platform_interface.dart';
 import 'package:meta/meta.dart';
 
 import '../cache_entry_metadata.dart';

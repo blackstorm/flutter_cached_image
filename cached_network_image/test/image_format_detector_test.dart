@@ -1,8 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
-import 'package:cached_network_image_platform_interface_ce/src/image_format_detector.dart';
-import 'package:cached_network_image_platform_interface_ce/src/unsupported_image_format_exception.dart';
+import 'package:cached_image_platform_interface/src/image_format_detector.dart';
+import 'package:cached_image_platform_interface/src/unsupported_image_format_exception.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {

@@ -3,7 +3,7 @@
 import 'dart:async';
 import 'dart:ui' as ui;
 
-import 'package:cached_network_image_platform_interface_ce/cached_network_image_platform_interface_ce.dart';
+import 'package:cached_image_platform_interface/cached_image_platform_interface.dart';
 import 'package:file/file.dart';
 import 'package:file/memory.dart';
 import 'package:flutter/widgets.dart';

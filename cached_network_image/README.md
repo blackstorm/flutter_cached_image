@@ -66,7 +66,7 @@ The API is identical to the original package. You can use `CachedNetworkImage` d
 ### Basic Usage with Placeholder
 
 ```dart
-import 'package:cached_network_image_ce/cached_network_image.dart';
+import 'package:cached_image/cached_network_image.dart';
 
 CachedNetworkImage(
   imageUrl: 'https://via.placeholder.com/350x150',
@@ -187,7 +187,7 @@ Intercept and modify HTTP requests, responses, and errors before they reach the 
 Useful for adding auth headers, logging, retrying, or short-circuiting with a synthetic response.
 
 ```dart
-import 'package:cached_network_image_ce/cached_network_image.dart';
+import 'package:cached_image/cached_network_image.dart';
 
 class AuthInterceptor extends HttpInterceptor {
   final String token;
@@ -221,7 +221,7 @@ the cache index. Only available on native IO targets (Android, iOS, macOS, Linux
 available on web.
 
 ```dart
-import 'package:cached_network_image_ce/cached_network_image.dart';
+import 'package:cached_image/cached_network_image.dart';
 
 // Reject storage for specific URLs (e.g. private/sensitive images).
 class PrivateImageInterceptor extends CacheInterceptor {

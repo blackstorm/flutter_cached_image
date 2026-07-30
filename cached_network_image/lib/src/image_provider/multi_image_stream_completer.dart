@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'dart:ui' as ui show Codec, FrameInfo;
 
-import 'package:cached_network_image_ce/src/gif_frame_duration.dart';
+import 'package:cached_image/src/gif_frame_duration.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 import 'package:flutter/scheduler.dart';

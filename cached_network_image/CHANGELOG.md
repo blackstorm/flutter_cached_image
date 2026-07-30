@@ -57,7 +57,7 @@ contributed by [@Chlx42](https://github.com/Chlx42) — thanks! (PR #58)
 
 ## [4.6.1] - 2026-03-04
 
-* **Fix:** Re-export `ConnectionParameters` from the main `cached_network_image_ce` barrel file so it is accessible without a separate `cached_network_image_platform_interface_ce` import.
+* **Fix:** Re-export `ConnectionParameters` from the main `cached_network_image_ce` barrel file so it is accessible without a separate `cached_image_platform_interface` import.
 * **Fix:** Added missing `connectionParameters` parameter to the stub `DefaultCacheManager` for unsupported platforms.
 * Added example demonstrating `DefaultCacheManager` with `ConnectionParameters`.
 

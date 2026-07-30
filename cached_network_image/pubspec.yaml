@@ -1,4 +1,4 @@
-name: cached_network_image_ce
+name: cached_image
 description: >
   Flutter library to load and cache network images. Metadata storage is
   pluggable (no Hive/MMKV/sqflite bundled). Maintained fork:
@@ -16,7 +16,7 @@ environment:
   flutter: ">=3.10.0"
 
 dependencies:
-  cached_network_image_platform_interface_ce:
+  cached_image_platform_interface:
     path: ../cached_network_image_platform_interface
   crypto: ^3.0.0
   file: ">=7.0.0 <8.0.0"
